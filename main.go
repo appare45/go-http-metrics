@@ -17,6 +17,7 @@ import (
 	// "go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
 	"go.opentelemetry.io/otel/metric"
 	metricsdk "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.34.0"
 )
@@ -39,8 +40,22 @@ func main() {
 	}
 
 	ctx := context.Background()
-	exporter, err := otlpmetricgrpc.New(ctx)
-	// exporter, err := stdoutmetric.New()
+	exporter, err := otlpmetricgrpc.New(ctx, otlpmetricgrpc.WithTemporalitySelector(func(ik metricsdk.InstrumentKind) metricdata.Temporality {
+		switch ik {
+		case metricsdk.InstrumentKindHistogram:
+			return metricdata.DeltaTemporality
+		default:
+			return metricsdk.DefaultTemporalitySelector(ik)
+		}
+	}))
+	// exporter2, err := stdoutmetric.New(stdoutmetric.WithTemporalitySelector(func(ik metricsdk.InstrumentKind) metricdata.Temporality {
+	// 	switch ik {
+	// 	case metricsdk.InstrumentKindHistogram:
+	// 		return metricdata.DeltaTemporality
+	// 	default:
+	// 		return metricsdk.DefaultTemporalitySelector(ik)
+	// 	}
+	// }))
 	if err != nil {
 		fmt.Printf("Failed to create exporter: %v\n", err)
 		return
@@ -50,7 +65,9 @@ func main() {
 		resource.Default(),
 		resource.NewWithAttributes(semconv.SchemaURL, semconv.ServiceName(target_url.String())))
 
-	provider := metricsdk.NewMeterProvider(metricsdk.WithResource(res), metricsdk.WithReader(metricsdk.NewPeriodicReader(exporter, metricsdk.WithInterval(interval))))
+	view := metricsdk.NewView(metricsdk.Instrument{Kind: metricsdk.InstrumentKindHistogram}, metricsdk.Stream{Aggregation: metricsdk.AggregationBase2ExponentialHistogram{MaxSize: 10, MaxScale: 1}})
+
+	provider := metricsdk.NewMeterProvider(metricsdk.WithResource(res), metricsdk.WithReader(metricsdk.NewPeriodicReader(exporter, metricsdk.WithInterval(interval))), metricsdk.WithView(view))
 	otel.SetMeterProvider(provider)
 	defer provider.Shutdown(ctx)
 
@@ -112,7 +129,6 @@ func measure(ctx context.Context, host string, target_url *url.URL, tcpHandshake
 
 	localip, _, _ := net.SplitHostPort(tcpConn.LocalAddr().String())
 
-	tcpHandshakeMeter.Record(ctx, tcpHandshakeDuration.Seconds(), metric.WithAttributes(attribute.String("sourceIp", localip)))
-	tlsHandshakeMeter.Record(ctx, tlsHandshakeDuration.Seconds(), metric.WithAttributes(attribute.String("sourceIp", localip)))
-
+	tcpHandshakeMeter.Record(ctx, tcpHandshakeDuration.Seconds(), metric.WithAttributes(semconv.NetworkLocalAddress(localip)))
+	tlsHandshakeMeter.Record(ctx, tlsHandshakeDuration.Seconds(), metric.WithAttributes(semconv.NetworkLocalAddress(localip)))
 }

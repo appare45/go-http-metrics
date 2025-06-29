@@ -2,7 +2,6 @@ package main
 
 import (
 	"crypto/tls"
-	"fmt"
 	"net"
 	"time"
 )
@@ -14,6 +13,5 @@ func measureTLSHandshake(tcpConn net.Conn, conf *tls.Config) (*tls.Conn, time.Du
 	start := time.Now()
 	err := client.Handshake()
 	duration := time.Since(start)
-	fmt.Printf("Trace start: %v, end: %v\n", start.String(), time.Now().String())
 	return client, duration, err
 }
